@@ -2,11 +2,13 @@
   "name": "tic-tac-toe-backend",
   "version": "1.0.0",
   "description": "Backend for Tic Tac Toe game",
-  "main": "src/server.js",
   "type": "module",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "start": "node dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc",
+    "watch": "tsc -w"
   },
   "keywords": [],
   "author": "",
@@ -15,8 +17,16 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
-    "mongodb": "^5.1.0",
+    "mongodb": "^6.3.0",
     "mongoose": "^8.13.2",
-    "socket.io": "^4.6.1"
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.5",
+    "@types/socket.io": "^3.0.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
   }
 }

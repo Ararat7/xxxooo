@@ -1,25 +1,22 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { io, Socket } from 'socket.io-client';
-
-interface Game {
-  id: string;
-  board: (string | null)[];
-  players: string[];
-  currentPlayer: string;
-  status: string;
-  winner?: string;
-}
+import { useNavigate, useParams } from 'react-router-dom';
+import io, { Socket } from 'socket.io-client';
+import { Game, GameMove } from '../types/game';
 
 const GameBoard = () => {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [game, setGame] = useState<Game | null>(null);
-  const { gameId } = useParams();
+  const [socket, setSocket] = useState<Socket | null>(null);
   const navigate = useNavigate();
+  const { gameId } = useParams<{ gameId: string }>();
 
   const isPlayerTurn = game?.currentPlayer === (game?.players[0] === socket?.id ? 'X' : 'O');
 
   useEffect(() => {
+    if (!gameId) {
+      navigate('/');
+      return;
+    }
+
     console.log('Initializing GameBoard with gameId:', gameId);
     const newSocket = io('http://localhost:3000', {
       withCredentials: true,
@@ -47,22 +44,17 @@ const GameBoard = () => {
       }
     });
 
-    newSocket.on('connect_error', (error) => {
+    newSocket.on('connect_error', (error: Error) => {
       console.error('Socket connection error:', error.message);
       console.error('Error details:', error);
     });
 
-    newSocket.on('disconnect', (reason) => {
+    newSocket.on('disconnect', (reason: string) => {
       console.log('Socket disconnected:', reason);
       if (reason === 'io server disconnect') {
-        // The server forcibly closed the connection
         console.log('Server closed the connection, attempting to reconnect...');
         newSocket.connect();
       }
-    });
-
-    newSocket.on('error', (error) => {
-      console.error('Socket error:', error);
     });
 
     newSocket.on('gameUpdate', (updatedGame: Game) => {
@@ -70,12 +62,11 @@ const GameBoard = () => {
       setGame(updatedGame);
     });
 
-    newSocket.on('playerReconnected', ({ playerId }) => {
+    newSocket.on('playerReconnected', ({ playerId }: { playerId: string }) => {
       console.log('Player reconnected:', playerId);
-      // You might want to show a notification that the other player is back
     });
 
-    newSocket.on('playerLeft', ({ playerId }) => {
+    newSocket.on('playerLeft', ({ playerId }: { playerId: string }) => {
       console.log('Player left:', playerId);
       if (game) {
         setGame({
@@ -90,17 +81,22 @@ const GameBoard = () => {
       console.log('Cleaning up socket');
       newSocket.close();
     };
-  }, [gameId]);
+  }, [gameId, navigate]);
 
   const handleClick = (index: number) => {
-    if (socket && game && game.status === 'in-progress') {
-      socket.emit('makeMove', { gameId, position: index });
+    if (socket && gameId && game && isPlayerTurn && game.board[index] === null) {
+      const move: GameMove = {
+        gameId,
+        position: index
+      };
+      socket.emit('makeMove', move);
     }
   };
 
   const handleRestart = () => {
-    if (socket && gameId) {
-      socket.emit('restartGame', gameId);
+    if (socket && game) {
+      console.log('Requesting game restart');
+      socket.emit('restartGame', game.id);
     }
   };
 
@@ -111,8 +107,48 @@ const GameBoard = () => {
     }
   };
 
+  useEffect(() => {
+    if (socket) {
+      socket.on('gameUpdate', (updatedGame: Game) => {
+        console.log('Received game update:', updatedGame);
+        setGame(updatedGame);
+      });
+
+      socket.on('error', (error: { message: string }) => {
+        console.error('Game error:', error);
+        alert(error.message);
+      });
+
+      socket.on('playerLeft', (data: { playerId: string }) => {
+        console.log('Player left:', data.playerId);
+        if (game) {
+          const updatedGame = {
+            ...game,
+            players: game.players.filter(id => id !== data.playerId),
+            status: game.players.length === 1 ? 'waiting' : game.status
+          };
+          setGame(updatedGame);
+        }
+      });
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('gameUpdate');
+        socket.off('error');
+        socket.off('playerLeft');
+      }
+    };
+  }, [socket, game]);
+
   if (!game) {
-    return <div>Loading...</div>;
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Loading game...</h1>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -122,14 +158,14 @@ const GameBoard = () => {
 
         <div className="mb-6">
           <p className="text-center text-gray-600">
-            {game?.status === 'waiting' ? 'Waiting for opponent...' :
-             game?.status === 'in-progress' ? `Current turn: ${game?.currentPlayer}` :
-             game?.status === 'finished' ? `Game over! ${game?.winner ? `Winner: ${game?.winner}` : 'Draw'}` : ''}
+            {game.status === 'waiting' ? 'Waiting for opponent...' :
+             game.status === 'in-progress' ? `Current turn: ${game.currentPlayer}` :
+             game.status === 'finished' ? `Game over! ${game.winner === 'draw' ? 'Draw' : `Winner: ${game.winner}`}` : ''}
           </p>
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-6">
-          {game?.board.map((cell, index) => (
+          {game.board.map((cell, index) => (
             <button
               key={index}
               onClick={() => handleClick(index)}

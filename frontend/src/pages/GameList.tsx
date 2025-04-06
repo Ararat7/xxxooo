@@ -1,17 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import io from 'socket.io-client';
-
-interface Game {
-  id: string;
-  board: (string | null)[];
-  players: string[];
-  currentPlayer: string;
-  status: string;
-}
+import io, { Socket } from 'socket.io-client';
+import { Game } from '../types/game';
 
 const GameList = () => {
-  const [socket, setSocket] = useState<ReturnType<typeof io> | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const navigate = useNavigate();
 
@@ -32,12 +25,12 @@ const GameList = () => {
       newSocket.emit('requestGameList');
     });
 
-    newSocket.on('connect_error', (error) => {
+    newSocket.on('connect_error', (error: Error) => {
       console.error('Socket connection error:', error.message);
       console.error('Error details:', error);
     });
 
-    newSocket.on('disconnect', (reason) => {
+    newSocket.on('disconnect', (reason: string) => {
       console.log('Socket disconnected:', reason);
       if (reason === 'io server disconnect') {
         // The server forcibly closed the connection
@@ -46,26 +39,34 @@ const GameList = () => {
       }
     });
 
-    newSocket.on('error', (error) => {
+    newSocket.on('error', (error: Error) => {
       console.error('Socket error:', error);
     });
 
     newSocket.on('gameListUpdate', (updatedGames: Game[]) => {
       console.log('Received game list update:', updatedGames);
-      const waitingGames = updatedGames.filter(game => game.status === 'waiting');
-      setGames(waitingGames);
+      // Show all games that are either waiting or in-progress with one player
+      const availableGames = updatedGames.filter(game =>
+        (game.status === 'waiting' ||
+         (game.status === 'in-progress' && game.players.length === 1)) &&
+        game.players.length < 2
+      );
+      console.log('Filtered available games:', availableGames);
+      setGames(availableGames);
     });
 
     newSocket.on('gameCreated', (game: Game) => {
       console.log('New game created:', game);
-      if (game.status === 'waiting') {
+      if (game.status === 'waiting' && game.players.length < 2) {
+        console.log('Adding game to list:', game);
         setGames(prev => [...prev, game]);
       }
     });
 
     newSocket.on('gameJoined', (game: Game) => {
       console.log('Game joined:', game);
-      if (game.status !== 'waiting') {
+      if (game.status === 'in-progress' && game.players.length >= 2) {
+        console.log('Removing game from list:', game.id);
         setGames(prev => prev.filter(g => g.id !== game.id));
       }
     });
@@ -85,9 +86,38 @@ const GameList = () => {
 
   const joinGame = (gameId: string) => {
     if (socket) {
-      console.log('Joining game:', gameId);
+      console.log('Attempting to join game:', gameId);
+      console.log('Current socket ID:', socket.id);
+
+      // Add error handler for this specific join attempt
+      const errorHandler = (error: { message: string }) => {
+        console.error('Error joining game:', error.message);
+        alert(error.message);
+        // Don't navigate if there was an error
+        return;
+      };
+
+      // Add success handler
+      const successHandler = (game: Game) => {
+        console.log('Successfully joined game:', game);
+        console.log('Game status:', game.status);
+        console.log('Game players:', game.players);
+        // Only navigate if the join was successful
+        navigate(`/game/${gameId}`);
+      };
+
+      // Set up one-time listeners
+      socket.once('error', errorHandler);
+      socket.once('gameJoined', successHandler);
+
+      // Emit the join request
       socket.emit('joinGame', gameId);
-      navigate(`/game/${gameId}`);
+
+      // Clean up listeners after 5 seconds if no response
+      setTimeout(() => {
+        socket.off('error', errorHandler);
+        socket.off('gameJoined', successHandler);
+      }, 5000);
     }
   };
 
@@ -117,8 +147,11 @@ const GameList = () => {
                   <p className="text-sm text-gray-500">
                     Status: {game.status === 'waiting' ? 'Waiting for player' : 'In progress'}
                   </p>
+                  <p className="text-sm text-gray-500">
+                    Players: {game.players.length}/2
+                  </p>
                 </div>
-                {game.status === 'waiting' && (
+                {game.status === 'waiting' && game.players.length < 2 && (
                   <button
                     onClick={() => joinGame(game.id)}
                     className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors"
